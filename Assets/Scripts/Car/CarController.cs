@@ -60,7 +60,13 @@ public class UniversalCarController : MonoBehaviour
     public float maxNitroBonusKMH = 50f; // Cuánto suma el nitro a la máxima normal
     public float nitroVelocityDropTime = 1.2f; // Segundos que tarda en bajar la máxima al valor original tras el nitro
 
-    float inputSteer, inputMotor, inputBrake;
+    [Header("Cooldown Bars")]
+    public UnityEngine.UI.Image jumpBarFill;
+    public UnityEngine.UI.Image nitroBarFill;
+
+    public SkillBars skills;
+
+    float inputSteer, inputMotor, inputBrake;
     public bool canJump = true;
     public float jumpCooldown = 4.0f; // segundos
     private float jumpTimer = 0f;
@@ -77,6 +83,7 @@ public class UniversalCarController : MonoBehaviour
         if (!rb) rb = GetComponent<Rigidbody>();
         rb.centerOfMass += centerOfMassOffset;
         currentMaxSpeedKMH = maxSpeedKMH;
+        skills = FindObjectOfType<SkillBars>();
     }
 
     void Update()
@@ -291,6 +298,7 @@ public class UniversalCarController : MonoBehaviour
     {
         rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
         jumpTimer = jumpCooldown;
+        skills.UseJump();
     }
 
     bool IsGrounded()
@@ -310,6 +318,7 @@ public class UniversalCarController : MonoBehaviour
         isNitroActive = true;
         nitroTimer = nitroDuration;
         nitroCooldownTimer = nitroCooldown + nitroDuration;
+        skills.UseTurbo();
 
         // Aumenta max speed durante nitro
         if (nitroDropRoutine != null) StopCoroutine(nitroDropRoutine);
@@ -340,7 +349,7 @@ public class UniversalCarController : MonoBehaviour
             yield return null;
         }
         currentMaxSpeedKMH = endMax; // Asegura justo el valor base al final
-    }
+    }
 
     void UpdateCooldownUI()
     {
@@ -377,6 +386,22 @@ public class UniversalCarController : MonoBehaviour
                 nitroCooldownText.text = "LISTO"; // <-- Alternativa
             }
         }
+
+        // --- Barra de Salto ---
+        if (jumpBarFill != null)
+        {
+            float jumpNormalized = Mathf.Clamp01((jumpCooldown - jumpTimer) / jumpCooldown);
+            jumpBarFill.fillAmount = jumpNormalized;
+        }
+
+        // --- Barra de Nitro ---
+        if (nitroBarFill != null)
+        {
+            float nitroTotal = nitroCooldown + nitroDuration;
+            float nitroNormalized = Mathf.Clamp01((nitroTotal - nitroCooldownTimer) / nitroTotal);
+            nitroBarFill.fillAmount = nitroNormalized;
+        }
+
     }
 
 
