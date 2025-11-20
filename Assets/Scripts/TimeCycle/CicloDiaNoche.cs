@@ -5,15 +5,37 @@ using UnityEngine;
 
 public class CicloDiaNoche : MonoBehaviour
 {
-
     [Range(0.0f, 24f)] public float Hora = 12;
     public Transform sol;
     private float solX;
+
+    // Variable privada para guardar la referencia de la luz y no buscarla en cada frame
+    private Light luzDelSol;
 
     [Header("UI Reloj TMP")]
     public TMP_Text relojUI;
 
     public float DuracionDelDiaEnMinutos = 1;
+
+    // --- AQUI ESTÁ LA SOLUCIÓN AL PROBLEMA DE ILUMINACIÓN ---
+    void Start()
+    {
+        // 1. Obtenemos el componente Light una sola vez al inicio
+        if (sol != null)
+        {
+            luzDelSol = sol.GetComponent<Light>();
+        }
+
+        // 2. Forzamos a Unity a reconocer este objeto como el SOL de la escena
+        if (luzDelSol != null)
+        {
+            RenderSettings.sun = luzDelSol;
+        }
+
+        // 3. Actualizamos el entorno para quitar lo oscuro
+        DynamicGI.UpdateEnvironment();
+    }
+    // -------------------------------------------------------
 
     void mostrarHoraEnUI()
     {
@@ -31,11 +53,18 @@ public class CicloDiaNoche : MonoBehaviour
     {
         solX = 15 * Hora;
         sol.localEulerAngles = new Vector3(solX, 0, 0);
-        if (Hora > 18 || Hora < 6)
+
+        // Usamos la variable 'luzDelSol' que guardamos en Start (es más rápido)
+        if (luzDelSol != null)
         {
-            sol.GetComponent<Light>().intensity = 0;
-        }else{
-            sol.GetComponent<Light>().intensity = 1;
+            if (Hora > 18 || Hora < 6)
+            {
+                luzDelSol.intensity = 0;
+            }
+            else
+            {
+                luzDelSol.intensity = 1;
+            }
         }
     }
 
@@ -48,8 +77,6 @@ public class CicloDiaNoche : MonoBehaviour
         {
             Hora = 0;
         }
-
-
 
         rotacionSol();
         mostrarHoraEnUI();
