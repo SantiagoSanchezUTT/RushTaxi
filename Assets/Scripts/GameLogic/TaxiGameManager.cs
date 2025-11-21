@@ -21,24 +21,18 @@ public class TaxiGameManager : MonoBehaviour
     [Header("Interfaz (UI)")]
     public TextMeshProUGUI timerText;
     public TextMeshProUGUI infoText;
+    public TextMeshProUGUI scoreText; // <--- ¡NUEVO! Arrastra aquí tu texto de puntaje
 
     [Header("Balance de Juego")]
     public float timePerUnitDistance = 0.5f;
     public float baseTimeBonus = 10.0f;
 
     [Header("Configuración de Dificultad")]
-    [Tooltip("Distancia máxima para encontrar un pasajero cerca de ti")]
     public float maxPickupSearchRadius = 150f;
-
-    [Tooltip("Distancia máxima para un viaje FÁCIL")]
     public float easyDistanceCap = 200f;
-
-    [Tooltip("Distancia máxima para un viaje MEDIO")]
     public float mediumDistanceCap = 500f;
-    // Cualquier viaje mayor a mediumDistanceCap se considera DIFÍCIL
 
     [Header("Progresión")]
-    [Tooltip("A partir de qué viaje empieza el modo difícil (Fase 3). Recomendado: 10")]
     public int hardModeThreshold = 10;
 
     [Header("Estado del Juego")]
@@ -46,6 +40,7 @@ public class TaxiGameManager : MonoBehaviour
     public bool hasPassenger = false;
     public float currentTimer = 0;
     public int completedTrips = 0;
+    public int highScore = 0; // <--- Para guardar el récord
 
     private GameObject currentPassengerObj;
     private GameObject currentDestinationObj;
@@ -58,8 +53,14 @@ public class TaxiGameManager : MonoBehaviour
     void Start()
     {
         Debug.Log("🚖 SISTEMA LISTO");
+
+        // Cargar el Récord guardado (si no existe, es 0)
+        highScore = PlayerPrefs.GetInt("TaxiHighScore", 0);
+
         if (infoText != null) infoText.text = "Presiona '2' para TAXI";
         if (timerText != null) timerText.text = "--";
+
+        UpdateScoreUI(); // Mostrar ceros al inicio
     }
 
     void Update()
@@ -93,7 +94,8 @@ public class TaxiGameManager : MonoBehaviour
 
         isMissionActive = true;
         hasPassenger = false;
-        completedTrips = 0; // Reiniciamos contador
+        completedTrips = 0;
+        UpdateScoreUI(); // Reiniciar contador visual a 0
 
         Debug.Log("--- 🟢 MISIÓN DE TAXI INICIADA ---");
         SpawnNewPassenger();
@@ -120,29 +122,25 @@ public class TaxiGameManager : MonoBehaviour
     {
         if (!isMissionActive) return;
 
-        // 1. BUSCAR CERCA: Filtramos puntos cercanos al jugador
         List<Transform> nearbyPoints = pickupPoints
             .Where(p => Vector3.Distance(playerCar.position, p.position) <= maxPickupSearchRadius)
             .ToList();
 
         Transform selectedSpawn;
 
-        // Si hay puntos cerca, elige uno de ellos. Si no, global.
         if (nearbyPoints.Count > 0)
-        {
             selectedSpawn = nearbyPoints[Random.Range(0, nearbyPoints.Count)];
-        }
         else
-        {
             selectedSpawn = pickupPoints[Random.Range(0, pickupPoints.Length)];
-        }
 
         currentPassengerObj = Instantiate(passengerPrefab, selectedSpawn.position, Quaternion.identity);
 
-        if (infoText != null) infoText.text = "Recoger en: " + selectedSpawn.name;
+        string zoneName = GetZoneNameFromPosition(selectedSpawn.position);
+
+        if (infoText != null) infoText.text = "Recoger en: " + zoneName;
         if (timerText != null) timerText.text = "Espera";
 
-        Debug.Log($"📍 Pasajero (Viaje #{completedTrips + 1}) esperando en: {selectedSpawn.name}");
+        Debug.Log($"📍 Pasajero generado en: {selectedSpawn.name} (Barrio: {zoneName})");
     }
 
     public void PickupPassenger()
@@ -159,63 +157,44 @@ public class TaxiGameManager : MonoBehaviour
     void GenerateSmartDestination()
     {
         Difficulty level = Difficulty.Easy;
-        float rand = Random.value; // 0.0 a 1.0
+        float rand = Random.value;
 
-        // --- LÓGICA DE PROBABILIDADES ACTUALIZADA ---
-
-        // FASE 1: INICIO (Viajes 0, 1, 2 -> Primeros 3)
-        if (completedTrips < 3)
-        {
-            level = Difficulty.Easy;
-        }
-        // FASE 2: INTERMEDIO (Hasta el viaje 9)
+        if (completedTrips < 3) level = Difficulty.Easy;
         else if (completedTrips < hardModeThreshold)
         {
-            // 25% Fácil | 50% Medio | 25% Difícil
             if (rand < 0.25f) level = Difficulty.Easy;
             else if (rand < 0.75f) level = Difficulty.Medium;
             else level = Difficulty.Hard;
         }
-        // FASE 3: HARDCORE (Viaje 10 en adelante)
         else
         {
-            // 5% Fácil | 40% Medio | 55% Difícil
             if (rand < 0.05f) level = Difficulty.Easy;
             else if (rand < 0.45f) level = Difficulty.Medium;
             else level = Difficulty.Hard;
         }
 
-        // --- FILTRADO DE DESTINOS ---
         List<Transform> validDestinations = new List<Transform>();
 
         foreach (Transform point in dropOffPoints)
         {
             float dist = Vector3.Distance(playerCar.position, point.position);
-
             switch (level)
             {
                 case Difficulty.Easy:
-                    if (dist <= easyDistanceCap) validDestinations.Add(point);
-                    break;
+                    if (dist <= easyDistanceCap) validDestinations.Add(point); break;
                 case Difficulty.Medium:
-                    if (dist > easyDistanceCap && dist <= mediumDistanceCap) validDestinations.Add(point);
-                    break;
+                    if (dist > easyDistanceCap && dist <= mediumDistanceCap) validDestinations.Add(point); break;
                 case Difficulty.Hard:
-                    if (dist > mediumDistanceCap) validDestinations.Add(point);
-                    break;
+                    if (dist > mediumDistanceCap) validDestinations.Add(point); break;
             }
         }
 
-        // FALLBACK: Si no encuentra destinos para esa dificultad, busca cualquiera
         Transform selectedDest;
         if (validDestinations.Count > 0)
-        {
             selectedDest = validDestinations[Random.Range(0, validDestinations.Count)];
-        }
         else
         {
-            // Si el filtro fue muy estricto y falló (ej. no hay puntos Hard), agarra cualquiera que esté lejos (si era Hard) o random total
-            Debug.LogWarning($"⚠️ No se encontraron destinos para {level}. Usando aleatorio global.");
+            Debug.LogWarning($"⚠️ Fallback activado para dificultad {level}.");
             selectedDest = dropOffPoints[Random.Range(0, dropOffPoints.Length)];
         }
 
@@ -224,9 +203,9 @@ public class TaxiGameManager : MonoBehaviour
         float distance = Vector3.Distance(playerCar.position, selectedDest.position);
         currentTimer = (distance * timePerUnitDistance) + baseTimeBonus;
 
-        if (infoText != null) infoText.text = $"Llevar a: {selectedDest.name} ({level})";
+        if (infoText != null) infoText.text = $"Llevar a: {selectedDest.name}";
 
-        Debug.Log($"🏁 Destino: {selectedDest.name} | Distancia: {distance:F1} | Dificultad: {level}");
+        Debug.Log($"🏁 Destino: {selectedDest.name} | Distancia: {distance:F1}");
     }
 
     public void DropOffPassenger()
@@ -234,15 +213,35 @@ public class TaxiGameManager : MonoBehaviour
         if (!isMissionActive) return;
 
         hasPassenger = false;
-        completedTrips++; // IMPORTANTE: Aumenta contador
+        completedTrips++; // Sumar viaje
+
+        // --- GUARDADO DE RÉCORD ---
+        if (completedTrips > highScore)
+        {
+            highScore = completedTrips;
+            PlayerPrefs.SetInt("TaxiHighScore", highScore); // Guardar en disco
+            PlayerPrefs.Save();
+        }
+
+        UpdateScoreUI(); // Actualizar texto
 
         if (currentDestinationObj != null) Destroy(currentDestinationObj);
 
-        if (infoText != null) infoText.text = $"¡Entregado! (+$$$) Total: {completedTrips}";
+        if (infoText != null) infoText.text = "¡Entregado! +$$$";
         if (timerText != null) timerText.text = ":)";
 
         Debug.Log("💰 ¡Viaje completado!");
         SpawnNewPassenger();
+    }
+
+    // --- NUEVO: FUNCIÓN PARA ACTUALIZAR EL TEXTO DE PUNTAJE ---
+    void UpdateScoreUI()
+    {
+        if (scoreText != null)
+        {
+            // Muestra:  "VIAJES: 5  |  RECORD: 12"
+            scoreText.text = $"VIAJES: {completedTrips}  |  RÉCORD: {highScore}";
+        }
     }
 
     void GameOver()
@@ -250,6 +249,17 @@ public class TaxiGameManager : MonoBehaviour
         Debug.Log("❌ ¡SE ACABÓ EL TIEMPO!");
         if (infoText != null) infoText.text = "¡TIEMPO FUERA!";
         StopMission();
+    }
+
+    string GetZoneNameFromPosition(Vector3 position)
+    {
+        Collider[] hitColliders = Physics.OverlapSphere(position, 2.0f);
+        foreach (var hit in hitColliders)
+        {
+            ZoneTrigger zone = hit.GetComponent<ZoneTrigger>();
+            if (zone != null) return zone.zoneName;
+        }
+        return "Zona Desconocida";
     }
 
     enum Difficulty { Easy, Medium, Hard }
