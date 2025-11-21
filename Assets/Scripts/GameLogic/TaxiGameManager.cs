@@ -1,27 +1,52 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using System.Linq;
+using TMPro;
 
 public class TaxiGameManager : MonoBehaviour
 {
     public static TaxiGameManager Instance;
 
-    [Header("Configuración")]
+    [Header("Configuración Básica")]
     public Transform playerCar;
-    public Transform[] spawnPoints;
+
+    [Header("Ubicaciones")]
+    public Transform[] pickupPoints;
+    public Transform[] dropOffPoints;
+
     public GameObject passengerPrefab;
     public GameObject destinationZonePrefab;
 
-    [Header("Dificultad")]
+    [Header("Interfaz (UI)")]
+    public TextMeshProUGUI timerText;
+    public TextMeshProUGUI infoText;
+
+    [Header("Balance de Juego")]
     public float timePerUnitDistance = 0.5f;
     public float baseTimeBonus = 10.0f;
+
+    [Header("Configuración de Dificultad")]
+    [Tooltip("Distancia máxima para encontrar un pasajero cerca de ti")]
+    public float maxPickupSearchRadius = 150f;
+
+    [Tooltip("Distancia máxima para un viaje FÁCIL")]
+    public float easyDistanceCap = 200f;
+
+    [Tooltip("Distancia máxima para un viaje MEDIO")]
+    public float mediumDistanceCap = 500f;
+    // Cualquier viaje mayor a mediumDistanceCap se considera DIFÍCIL
+
+    [Header("Progresión")]
+    [Tooltip("A partir de qué viaje empieza el modo difícil (Fase 3). Recomendado: 10")]
+    public int hardModeThreshold = 10;
 
     [Header("Estado del Juego")]
     public bool isMissionActive = false;
     public bool hasPassenger = false;
     public float currentTimer = 0;
+    public int completedTrips = 0;
 
-    // Variables privadas para guardar la referencia de los objetos creados
     private GameObject currentPassengerObj;
     private GameObject currentDestinationObj;
 
@@ -32,68 +57,44 @@ public class TaxiGameManager : MonoBehaviour
 
     void Start()
     {
-        Debug.Log("🚖 SISTEMA LISTO: Presiona '2' para iniciar el trabajo de taxi.");
+        Debug.Log("🚖 SISTEMA LISTO");
+        if (infoText != null) infoText.text = "Presiona '2' para TAXI";
+        if (timerText != null) timerText.text = "--";
     }
 
     void Update()
     {
-        // 1. DETECTAR EL INPUT (Tecla 2 del teclado alfanumérico)
-        if (Input.GetKeyDown(KeyCode.Alpha2))
-        {
-            ToggleMissionMode();
-        }
+        if (Input.GetKeyDown(KeyCode.Alpha2)) ToggleMissionMode();
 
-        // Si la misión NO está activa, no hacemos nada más
         if (!isMissionActive) return;
 
-        // 2. Lógica del Temporizador (Solo corre si tienes pasajero)
         if (hasPassenger)
         {
             currentTimer -= Time.deltaTime;
+            if (timerText != null) timerText.text = currentTimer.ToString("F1");
 
-            // Aquí podrías actualizar tu UI de texto en el futuro
-
-            if (currentTimer <= 0)
-            {
-                GameOver();
-            }
-        }
-
-        // 3. --- DEBUG VISUAL (LÍNEAS) ---
-        // Esto dibuja líneas en la escena para que sepas dónde ir
-        if (playerCar != null)
-        {
-            if (currentPassengerObj != null && !hasPassenger)
-            {
-                // Línea ROJA hacia el pasajero a recoger
-                Debug.DrawLine(playerCar.position, currentPassengerObj.transform.position, Color.red);
-            }
-            else if (currentDestinationObj != null && hasPassenger)
-            {
-                // Línea VERDE hacia el destino final
-                Debug.DrawLine(playerCar.position, currentDestinationObj.transform.position, Color.green);
-            }
+            if (currentTimer <= 0) GameOver();
         }
     }
 
-    // --- CONTROL DE MISIONES ---
-
     public void ToggleMissionMode()
     {
-        if (isMissionActive)
-        {
-            StopMission(); // Apagar
-        }
-        else
-        {
-            StartMission(); // Encender
-        }
+        if (isMissionActive) StopMission();
+        else StartMission();
     }
 
     void StartMission()
     {
+        if (pickupPoints.Length == 0 || dropOffPoints.Length == 0)
+        {
+            Debug.LogError("⚠️ Faltan puntos en el Inspector.");
+            return;
+        }
+
         isMissionActive = true;
         hasPassenger = false;
+        completedTrips = 0; // Reiniciamos contador
+
         Debug.Log("--- 🟢 MISIÓN DE TAXI INICIADA ---");
         SpawnNewPassenger();
     }
@@ -104,28 +105,44 @@ public class TaxiGameManager : MonoBehaviour
         hasPassenger = false;
         currentTimer = 0;
 
-        // LIMPIEZA: Borrar objetos sobrantes
+        if (infoText != null) infoText.text = "LIBRE (Presiona 2)";
+        if (timerText != null) timerText.text = "OFF";
+
         if (currentPassengerObj != null) Destroy(currentPassengerObj);
         if (currentDestinationObj != null) Destroy(currentDestinationObj);
 
-        Debug.Log("--- 🔴 MISIÓN CANCELADA (Modo Libre) ---");
+        Debug.Log("--- 🔴 MISIÓN CANCELADA ---");
     }
 
-    // --- LÓGICA DEL JUEGO ---
+    // --- LÓGICA DE JUEGO ---
 
     public void SpawnNewPassenger()
     {
         if (!isMissionActive) return;
 
-        // Elegir punto aleatorio
-        int randomIndex = Random.Range(0, spawnPoints.Length);
-        Transform selectedSpawn = spawnPoints[randomIndex];
+        // 1. BUSCAR CERCA: Filtramos puntos cercanos al jugador
+        List<Transform> nearbyPoints = pickupPoints
+            .Where(p => Vector3.Distance(playerCar.position, p.position) <= maxPickupSearchRadius)
+            .ToList();
 
-        // Crear Pasajero
+        Transform selectedSpawn;
+
+        // Si hay puntos cerca, elige uno de ellos. Si no, global.
+        if (nearbyPoints.Count > 0)
+        {
+            selectedSpawn = nearbyPoints[Random.Range(0, nearbyPoints.Count)];
+        }
+        else
+        {
+            selectedSpawn = pickupPoints[Random.Range(0, pickupPoints.Length)];
+        }
+
         currentPassengerObj = Instantiate(passengerPrefab, selectedSpawn.position, Quaternion.identity);
 
-        // LOG DEPURACIÓN: Nos dice el nombre exacto del punto
-        Debug.Log("📍 Nuevo Pasajero en: " + selectedSpawn.name);
+        if (infoText != null) infoText.text = "Recoger en: " + selectedSpawn.name;
+        if (timerText != null) timerText.text = "Espera";
+
+        Debug.Log($"📍 Pasajero (Viaje #{completedTrips + 1}) esperando en: {selectedSpawn.name}");
     }
 
     public void PickupPassenger()
@@ -133,30 +150,83 @@ public class TaxiGameManager : MonoBehaviour
         if (!isMissionActive) return;
 
         hasPassenger = true;
-
-        // Borrar la esfera del pasajero (ya se subió)
         if (currentPassengerObj != null) Destroy(currentPassengerObj);
 
         Debug.Log("🚕 ¡Pasajero Recogido!");
-
-        GenerateDestination();
+        GenerateSmartDestination();
     }
 
-    void GenerateDestination()
+    void GenerateSmartDestination()
     {
-        // Elegir destino aleatorio
-        int randomIndex = Random.Range(0, spawnPoints.Length);
-        Transform selectedDest = spawnPoints[randomIndex];
+        Difficulty level = Difficulty.Easy;
+        float rand = Random.value; // 0.0 a 1.0
 
-        // Crear zona de destino
+        // --- LÓGICA DE PROBABILIDADES ACTUALIZADA ---
+
+        // FASE 1: INICIO (Viajes 0, 1, 2 -> Primeros 3)
+        if (completedTrips < 3)
+        {
+            level = Difficulty.Easy;
+        }
+        // FASE 2: INTERMEDIO (Hasta el viaje 9)
+        else if (completedTrips < hardModeThreshold)
+        {
+            // 25% Fácil | 50% Medio | 25% Difícil
+            if (rand < 0.25f) level = Difficulty.Easy;
+            else if (rand < 0.75f) level = Difficulty.Medium;
+            else level = Difficulty.Hard;
+        }
+        // FASE 3: HARDCORE (Viaje 10 en adelante)
+        else
+        {
+            // 5% Fácil | 40% Medio | 55% Difícil
+            if (rand < 0.05f) level = Difficulty.Easy;
+            else if (rand < 0.45f) level = Difficulty.Medium;
+            else level = Difficulty.Hard;
+        }
+
+        // --- FILTRADO DE DESTINOS ---
+        List<Transform> validDestinations = new List<Transform>();
+
+        foreach (Transform point in dropOffPoints)
+        {
+            float dist = Vector3.Distance(playerCar.position, point.position);
+
+            switch (level)
+            {
+                case Difficulty.Easy:
+                    if (dist <= easyDistanceCap) validDestinations.Add(point);
+                    break;
+                case Difficulty.Medium:
+                    if (dist > easyDistanceCap && dist <= mediumDistanceCap) validDestinations.Add(point);
+                    break;
+                case Difficulty.Hard:
+                    if (dist > mediumDistanceCap) validDestinations.Add(point);
+                    break;
+            }
+        }
+
+        // FALLBACK: Si no encuentra destinos para esa dificultad, busca cualquiera
+        Transform selectedDest;
+        if (validDestinations.Count > 0)
+        {
+            selectedDest = validDestinations[Random.Range(0, validDestinations.Count)];
+        }
+        else
+        {
+            // Si el filtro fue muy estricto y falló (ej. no hay puntos Hard), agarra cualquiera que esté lejos (si era Hard) o random total
+            Debug.LogWarning($"⚠️ No se encontraron destinos para {level}. Usando aleatorio global.");
+            selectedDest = dropOffPoints[Random.Range(0, dropOffPoints.Length)];
+        }
+
         currentDestinationObj = Instantiate(destinationZonePrefab, selectedDest.position, Quaternion.identity);
 
-        // CALCULAR DIFICULTAD
         float distance = Vector3.Distance(playerCar.position, selectedDest.position);
         currentTimer = (distance * timePerUnitDistance) + baseTimeBonus;
 
-        // LOG DEPURACIÓN
-        Debug.Log("🏁 Destino generado en: " + selectedDest.name + " || Distancia: " + (int)distance + "m || Tiempo: " + (int)currentTimer + "s");
+        if (infoText != null) infoText.text = $"Llevar a: {selectedDest.name} ({level})";
+
+        Debug.Log($"🏁 Destino: {selectedDest.name} | Distancia: {distance:F1} | Dificultad: {level}");
     }
 
     public void DropOffPassenger()
@@ -164,19 +234,23 @@ public class TaxiGameManager : MonoBehaviour
         if (!isMissionActive) return;
 
         hasPassenger = false;
+        completedTrips++; // IMPORTANTE: Aumenta contador
 
-        // Borrar el destino
         if (currentDestinationObj != null) Destroy(currentDestinationObj);
 
-        Debug.Log("💰 ¡Viaje completado! +$$$");
+        if (infoText != null) infoText.text = $"¡Entregado! (+$$$) Total: {completedTrips}";
+        if (timerText != null) timerText.text = ":)";
 
-        // Generar el siguiente inmediatamente
+        Debug.Log("💰 ¡Viaje completado!");
         SpawnNewPassenger();
     }
 
     void GameOver()
     {
-        Debug.Log("❌ ¡SE ACABÓ EL TIEMPO! Game Over.");
+        Debug.Log("❌ ¡SE ACABÓ EL TIEMPO!");
+        if (infoText != null) infoText.text = "¡TIEMPO FUERA!";
         StopMission();
     }
+
+    enum Difficulty { Easy, Medium, Hard }
 }
