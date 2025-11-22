@@ -36,7 +36,7 @@ public class UniversalCarController : MonoBehaviour
     public float antiRollStrength = 10000f;
 
     [Header("Flip Car")]
-    public KeyCode flipKey = KeyCode.R;
+    public KeyCode flipKey = KeyCode.Q;
     public float flipHeight = 1.5f;
     public float flipSpeed = 5f;
 
